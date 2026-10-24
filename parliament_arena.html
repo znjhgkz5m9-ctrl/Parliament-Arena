@@ -1,0 +1,405 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parliament Arena</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#090b18;color:white;font-family:Arial;text-align:center;padding:12px}
+h1{color:#ffd166;text-shadow:0 0 15px #ff6600}
+button{padding:11px 17px;margin:5px;border:0;border-radius:8px;background:#ffd166;font-weight:bold;cursor:pointer}
+button:hover{filter:brightness(1.15)}
+.panel{max-width:1000px;margin:12px auto;padding:12px;background:#191a30;border-radius:12px}
+canvas{display:block;width:100%;height:auto}
+.arena{max-width:1000px;margin:auto;border:3px solid #ffd166;border-radius:12px;overflow:hidden}
+#setup{position:fixed;inset:0;background:#080a16dd;display:flex;align-items:center;justify-content:center;z-index:5;padding:15px}
+.card{max-width:620px;width:100%;padding:24px;background:#191a30;border:2px solid #ffd166;border-radius:18px}
+#options{display:flex;flex-wrap:wrap;justify-content:center}
+#status{color:#ffdf88;min-height:24px}
+.hidden{display:none!important}
+</style>
+</head>
+
+<script>
+const music = document.getElementById("backgroundMusic");
+
+music.loop = true;
+music.volume = 0.4;
+
+function startBackgroundMusic() {
+    music.play().catch(() => {
+        console.log("Music will start after your first interaction.");
+    });
+}
+
+window.addEventListener("load", startBackgroundMusic);
+
+// Start music when the player clicks the game interface.
+document.addEventListener("click", startBackgroundMusic, { once: true });
+</script>
+
+<body>
+
+<audio id="backgroundMusic" loop autoplay>
+    <source src="AUDIO-2026-10-25-00-44-54.mp3" type="audio/mpeg">
+    Your browser does not support audio.
+</audio>
+
+<div id="setup">
+ <div class="card">
+  <h1 id="setupTitle">PARLIAMENT ARENA</h1>
+  <p id="question">Which mode do you want to play?</p>
+  <div id="options"></div>
+  <p id="hint">Choose your mode.</p>
+ </div>
+</div>
+
+<h1>⚔ PARLIAMENT ARENA ⚔</h1>
+<p>Jantar Mantar Showdown</p>
+<div class="panel">
+ <b>Player 1:</b> A/D move · W jump · F attack · G shield · H special
+ <br><br>
+ <b>Player 2:</b> ←/→ move · ↑ jump · / attack · . shield · , special
+</div>
+
+<div class="arena">
+ <canvas id="game" width="1000" height="600"></canvas>
+</div>
+<p id="status">Choose your mode to start.</p>
+<h3 id="levelLabel">Level 1 / 10</h3>
+<div id="after" class="hidden">
+ <button onclick="restartLevel()">↻ Restart</button>
+ <button id="next" onclick="nextLevel()">▶ Next Level</button>
+ <button onclick="showModes()">← Back / Change Character</button>
+</div>
+
+<script>
+// ---------- IMAGES ----------
+// Put the image files in the same folder as this HTML file.
+function loadImage(src){
+ const im=new Image();
+ im.src=src;
+ im.onerror=()=>console.warn("Image not found:",src);
+ return im;
+}
+const img={
+ bg:loadImage("jantar mantar .jpeg"),
+ modi:loadImage("modi_scratch-removebg-preview (2).png"),
+ rahul:loadImage("rahul_gandhi-removebg-preview.png"),
+ mamta:loadImage("mamta baneerji.jpeg"),
+ melody:loadImage("melody .jpeg"),
+ chappal:loadImage("chappal.jpeg")
+};
+
+// ---------- GAME STATE ----------
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const W=canvas.width,H=canvas.height,GROUND=490;
+const keys={};
+let frame=0,level=1,mode="computer";
+let human=0,aiIndex=1,started=false,ended=false;
+let effects=[],lastWinner="";
+
+// ---------- CHARACTERS ----------
+function makePlayer(name,image,special,color,controls){
+ return {
+  name,image,special,color,controls,
+  x:0,y:0,w:100,h:140,hp:100,
+  vx:0,vy:0,facing:1,
+  shield:false,attack:0,specialTime:0,
+  cooldown:0,aiJump:0
+ };
+}
+const controls1={left:"a",right:"d",jump:"w",attack:"f",shield:"g",special:"h"};
+const controls2={left:"arrowleft",right:"arrowright",jump:"arrowup",attack:"/",shield:".",special:","};
+
+const P=[
+ makePlayer("Modi",img.modi,"melody","#ff811f",controls1),
+ makePlayer("Rahul Gandhi",img.rahul,"potato","#22bb72",controls2)
+];
+const names=["Modi","Rahul Gandhi","Mamta Banerjee"];
+
+// ---------- SETUP SCREENS ----------
+function screen(title,question,hint,buttons){
+ document.getElementById("setup").classList.remove("hidden");
+ document.getElementById("setupTitle").textContent=title;
+ document.getElementById("question").textContent=question;
+ document.getElementById("hint").textContent=hint;
+ const box=document.getElementById("options");
+ box.innerHTML="";
+ buttons.forEach(b=>{
+  const el=document.createElement("button");
+  el.textContent=b.label;
+  el.onclick=b.run;
+  box.appendChild(el);
+ });
+}
+function showModes(){
+ started=false;
+ screen("PARLIAMENT ARENA","Which mode do you want to play?","Choose a mode.",[
+  {label:"🤖 Play with Computer",run:showCharacters},
+  {label:"👥 Play with Friend",run:()=>chooseReady("friend",0)}
+ ]);
+}
+function showCharacters(){
+ screen("Choose Your Character","Which character did you choose?","Choose Modi, Rahul or Mamta.",[
+  {label:"Modi",run:()=>chooseReady("computer",0)},
+  {label:"Rahul Gandhi",run:()=>chooseReady("computer",1)},
+  {label:"Mamta Banerjee",run:()=>chooseReady("computer",2)},
+  {label:"← Back",run:showModes}
+ ]);
+}
+function chooseReady(m,index){
+ screen("Ready for the Arena?",
+  m==="computer"?"You chose "+names[index]+".":"You chose Play with Friend.",
+  "Press Start when you are ready.",[
+   {label:"▶ START GAME",run:()=>startGame(m,index)},
+   {label:"← Back",run:m==="computer"?showCharacters:showModes}
+  ]);
+}
+function startGame(m,index){
+ mode=m;
+ human=index===2?0:index;
+ aiIndex=1-human;
+
+ if(index===0){
+  P[0].name="Modi";P[0].image=img.modi;P[0].special="melody";
+  P[1].name="Rahul Gandhi";P[1].image=img.rahul;P[1].special="potato";
+ }else if(index===1){
+  P[0].name="Modi";P[0].image=img.modi;P[0].special="melody";
+  P[1].name="Rahul Gandhi";P[1].image=img.rahul;P[1].special="potato";
+ }else{
+  P[0].name="Mamta Banerjee";P[0].image=img.mamta;P[0].special="chappal";
+  P[1].name="Rahul Gandhi";P[1].image=img.rahul;P[1].special="potato";
+ }
+ if(m==="friend"){
+  P[0].name="Modi";P[0].image=img.modi;P[0].special="melody";
+  P[1].name="Rahul Gandhi";P[1].image=img.rahul;P[1].special="potato";
+  human=0;aiIndex=1;
+ }
+ level=1;
+ resetLevel();
+ started=true;
+ document.getElementById("setup").classList.add("hidden");
+ document.getElementById("status").textContent="Fight! Special powers recharge every 5 seconds.";
+}
+
+// ---------- RESET / LEVELS ----------
+function resetLevel(){
+ ended=false;lastWinner="";effects=[];
+ P.forEach((p,i)=>{
+  p.x=i===0?140:760;
+  p.y=GROUND-p.h;
+  p.vx=0;p.vy=0;p.hp=100;
+  p.shield=false;p.attack=0;
+  p.specialTime=0;p.cooldown=0;
+ });
+ document.getElementById("after").classList.add("hidden");
+ document.getElementById("levelLabel").textContent="Level "+level+" / 10";
+ document.getElementById("next").style.display=level<10?"inline-block":"none";
+}
+function restartLevel(){resetLevel()}
+function nextLevel(){
+ if(level<10){
+  level++;resetLevel();
+  document.getElementById("status").textContent="Level "+level+"! The opponent is faster.";
+ }else{
+  document.getElementById("status").textContent="Congratulations! You completed all 10 levels!";
+ }
+}
+
+// ---------- INPUT ----------
+window.addEventListener("keydown",e=>{
+ const k=e.key.toLowerCase();
+ if(["arrowleft","arrowright","arrowup"," "].includes(k))e.preventDefault();
+ if(!keys[k]&&started&&!ended){
+  P.forEach((p,i)=>{
+   if(mode==="computer"&&i===aiIndex)return;
+   if(k===p.controls.attack)attack(p,12);
+   if(k===p.controls.special&&p.cooldown<=0)special(p);
+  });
+ }
+ keys[k]=true;
+});
+window.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+// ---------- FIGHTING ----------
+function enemy(p){return P[p===P[0]?1:0]}
+function attack(p,damage){
+ p.attack=16;
+ const q=enemy(p);
+ if(Math.abs((p.x+p.w/2)-(q.x+q.w/2))<145)hurt(q,damage);
+ effects.push({type:"slash",x:p.x+p.w/2,y:p.y+50,vx:p.facing*4,life:18});
+}
+function hurt(p,damage){
+ if(p.shield)damage*=0.2;
+ p.hp=Math.max(0,p.hp-damage);
+ effects.push({type:"hit",x:p.x+p.w/2,y:p.y+50,life:25});
+ if(p.hp<=0&&!ended){
+  ended=true;lastWinner=enemy(p).name;
+  document.getElementById("after").classList.remove("hidden");
+  document.getElementById("next").style.display=
+   mode==="computer"&&p===P[aiIndex]&&level<10?"inline-block":"none";
+  document.getElementById("status").textContent=
+   mode==="computer"&&p===P[aiIndex]
+   ?(level<10?"🏆 Level "+level+" complete!":"🏆 You won all 10 levels!")
+   :lastWinner+" wins!";
+ }
+}
+function special(p){
+ p.specialTime=120;
+ p.cooldown=300;
+ const q=enemy(p);
+ const type=p.special;
+ effects.push({type,x:p.x+p.w/2,y:p.y+35,vx:p.facing*6,life:70});
+ if(Math.abs((p.x+p.w/2)-(q.x+q.w/2))<340)hurt(q,24);
+}
+
+// ---------- COMPUTER AI ----------
+// AI chooses horizontal movement. Physics is applied separately below.
+function updateComputer(ai,target){
+ const dx=(target.x+target.w/2)-(ai.x+ai.w/2);
+ const distance=Math.abs(dx);
+ ai.facing=dx>=0?1:-1;
+
+ // Chase the player, not just attack.
+ const stopDistance=95;
+ const speed=2.4+level*0.22;
+ if(distance>stopDistance)ai.vx=Math.sign(dx)*speed;
+ else ai.vx=0;
+
+ // Occasionally jump while pursuing.
+ if(target.y+35<ai.y && ai.y+ai.h>=GROUND-2){
+  ai.vy=-11;
+ }
+ if(distance<155&&frame%Math.max(18,44-level*2)===0){
+  attack(ai,9+level);
+ }
+ if(distance<300&&ai.cooldown<=0&&frame%90===0){
+  special(ai);
+ }
+}
+
+// ---------- PLAYER UPDATE + PHYSICS ----------
+function updatePlayer(p,i){
+ const isAI=mode==="computer"&&i===aiIndex;
+
+ // IMPORTANT: AI movement is not overwritten by keyboard input.
+ if(!isAI){
+  p.vx=0;
+  if(keys[p.controls.left]){p.vx=-4;p.facing=-1}
+  if(keys[p.controls.right]){p.vx=4;p.facing=1}
+  if(keys[p.controls.jump]&&p.y+p.h>=GROUND-1)p.vy=-13;
+  p.shield=!!keys[p.controls.shield];
+ }else{
+  p.shield=false;
+ }
+
+ // Physics runs for BOTH the human and the computer.
+ p.x+=p.vx;
+ p.vy+=0.58;
+ p.y+=p.vy;
+
+ if(p.y+p.h>=GROUND){p.y=GROUND-p.h;p.vy=0}
+ p.x=Math.max(0,Math.min(W-p.w,p.x));
+
+ if(p.attack>0)p.attack--;
+ if(p.specialTime>0)p.specialTime--;
+ if(p.cooldown>0)p.cooldown--;
+}
+
+// ---------- UPDATE ----------
+function update(){
+ frame++;
+ if(!started||ended)return;
+
+ if(mode==="computer"){
+  updateComputer(P[aiIndex],P[human]);
+ }
+ P.forEach(updatePlayer);
+
+ effects.forEach(f=>{
+  f.x+=(f.vx||0);f.y+=(f.vy||0);f.life--;
+ });
+ effects=effects.filter(f=>f.life>0);
+}
+
+// ---------- DRAWING ----------
+function drawBackground(){
+ if(img.bg.complete&&img.bg.naturalWidth){
+  ctx.drawImage(img.bg,0,0,W,GROUND);
+ }else{
+  ctx.fillStyle="#9b8060";ctx.fillRect(0,0,W,GROUND);
+  ctx.fillStyle="#c3a47c";ctx.font="30px Arial";
+  ctx.fillText("JANTAR MANTAR",350,180);
+ }
+ ctx.fillStyle="#514a40";ctx.fillRect(0,GROUND,W,H-GROUND);
+ ctx.fillStyle="#d0b48a";ctx.fillRect(0,GROUND,W,8);
+}
+function drawHealth(p,x){
+ ctx.fillStyle="#333";ctx.fillRect(x,25,300,22);
+ ctx.fillStyle=p.color;ctx.fillRect(x+2,27,296*p.hp/100,18);
+ ctx.strokeStyle="white";ctx.strokeRect(x,25,300,22);
+ ctx.fillStyle="white";ctx.font="bold 16px Arial";
+ ctx.fillText(p.name+" "+Math.ceil(p.hp)+"%",x,19);
+}
+function drawCharacter(p){
+ const im=p.image;
+ if(im.complete&&im.naturalWidth){
+  // Contain the full character image without cropping.
+  const scale=Math.min((p.w+35)/im.naturalWidth,(p.h+60)/im.naturalHeight);
+  const dw=im.naturalWidth*scale,dh=im.naturalHeight*scale;
+  ctx.drawImage(im,p.x+p.w/2-dw/2,p.y+p.h-dh,dw,dh);
+ }else{
+  ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,p.w,p.h);
+  ctx.fillStyle="white";ctx.font="14px Arial";
+  ctx.fillText(p.name,p.x-10,p.y-8);
+ }
+ if(p.shield){
+  ctx.strokeStyle="#7deaff";ctx.lineWidth=5;
+  ctx.beginPath();ctx.ellipse(p.x+p.w/2,p.y+65,72,83,0,0,Math.PI*2);ctx.stroke();
+ }
+ if(p.specialTime>0){
+  ctx.fillStyle="#fff";ctx.font="bold 18px Arial";
+  ctx.fillText(p.special.toUpperCase()+" POWER!",p.x-15,p.y-18);
+ }
+}
+function drawEffects(){
+ effects.forEach(f=>{
+  ctx.save();
+  if(f.type==="melody"&&img.melody.complete&&img.melody.naturalWidth){
+   ctx.drawImage(img.melody,f.x-25,f.y-20,55,40);
+  }else if(f.type==="chappal"&&img.chappal.complete&&img.chappal.naturalWidth){
+   ctx.drawImage(img.chappal,f.x-25,f.y-15,55,35);
+  }else if(f.type==="potato"){
+   ctx.font="36px serif";ctx.fillText("🥔",f.x,f.y);
+  }else{
+   ctx.strokeStyle=f.type==="slash"?"#fff":"#ff8c5a";
+   ctx.lineWidth=5;ctx.beginPath();ctx.arc(f.x,f.y,20,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.restore();
+ });
+}
+function draw(){
+ drawBackground();
+ drawHealth(P[0],25);drawHealth(P[1],W-325);
+ ctx.fillStyle="white";ctx.font="bold 20px Arial";ctx.textAlign="center";
+ if(mode==="computer")ctx.fillText("LEVEL "+level+" / 10",W/2,80);
+ ctx.textAlign="left";
+ P.forEach(drawCharacter);drawEffects();
+
+ if(ended){
+  ctx.fillStyle="#0009";ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#ffd166";ctx.textAlign="center";
+  ctx.font="bold 42px Arial";ctx.fillText(lastWinner+" WINS!",W/2,H/2);
+  ctx.textAlign="left";
+ }
+}
+function loop(){update();draw();requestAnimationFrame(loop)}
+showModes();
+loop();
+</script>
+</body>
+</html>
